@@ -11,7 +11,7 @@
     <link href="https://cdn.datatables.net/1.13.7/css/dataTables.bootstrap5.min.css" rel="stylesheet">
     <link href="https://cdn.datatables.net/buttons/2.4.2/css/buttons.bootstrap5.min.css" rel="stylesheet">
     <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/5.15.4/css/all.min.css" rel="stylesheet">
-
+    
     <!-- Required Scripts -->
     <script src="https://cdnjs.cloudflare.com/ajax/libs/xlsx/0.17.5/xlsx.full.min.js"></script>
     <script src="https://code.jquery.com/jquery-3.7.0.min.js"></script>
@@ -21,6 +21,8 @@
     <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.bootstrap5.min.js"></script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
     <script src="https://cdn.datatables.net/buttons/2.4.2/js/buttons.html5.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/chartjs-plugin-datalabels@2.0.0"></script>
 
     <style>
         .table-responsive {
@@ -77,13 +79,25 @@
         .dataTables_wrapper .dataTables_filter {
             margin-bottom: 10px;
         }
+        .chart-container {
+            max-width: 800px; /* ขนาดเล็กลง */
+            height: 350px; /* ขนาดเล็กลง */
+            margin: 20px auto;
+            padding: 15px;
+            background: #fff;
+            border-radius: 8px;
+            box-shadow: 0 2px 5px rgba(0,0,0,0.1);
+            position: relative;
+        }
+        #fineChart {
+            max-height: 100% !important;
+        }
     </style>
 </head>
 <body class="container-fluid p-4">
     <div id="datetime"></div>
     <h2 class="mb-4 text-center">ค่าปรับอุปกรณ์</h2>
     <div id="loading" class="loading">กำลังโหลดข้อมูล...</div>
-
     <div class="action-buttons">
         <button id="refreshBtn" class="btn btn-outline-primary">
             <i class="fas fa-sync-alt"></i> รีเฟรช
@@ -91,6 +105,11 @@
         <button id="downloadBtn" class="btn btn-outline-success">
             <i class="fas fa-file-excel"></i> ดาวน์โหลด Excel
         </button>
+    </div>
+    
+    <div class="chart-container">
+        <h3 class="text-center mb-3">กราฟค่าปรับตามงานและเดือน</h3>
+        <canvas id="fineChart"></canvas>
     </div>
 
     <div class="table-responsive">
@@ -106,6 +125,12 @@
         const SHEET_URL = 'https://docs.google.com/spreadsheets/d/e/2PACX-1vR2THX4NX-UftdTl401jr4f0oGU_IUUV6PIyDuI1ce4gcmk4j11XifsClyEwHhDZVoFmOy4OMzaJjMQ/pub?gid=198014265&single=true&output=csv';
         const SELECTED_COLUMNS = [0,2,5,6,7,8,9,12,17,18,19,20,21];
         let dataTable = null;
+        let chart = null;
+
+        const COLORS = [
+            '#4dc9f6', // สีฟ้าสำหรับ TVS CATV
+            '#f67019'  // สีส้มสำหรับ TOL
+        ];
 
         function updateDateTime() {
             const now = new Date();
@@ -122,13 +147,10 @@
                 const response = await fetch(SHEET_URL);
                 if (!response.ok) throw new Error('Network response was not ok');
                 const text = await response.text();
-
-                // Improved CSV parsing
                 let rows = [];
                 let insideQuotes = false;
                 let currentRow = [];
                 let currentCell = '';
-
                 for (let i = 0; i < text.length; i++) {
                     const char = text[i];
                     if (char === '"') {
@@ -137,9 +159,7 @@
                         currentRow.push(currentCell.trim());
                         currentCell = '';
                     } else if ((char === '\n' || char === '\r') && !insideQuotes) {
-                        if (char === '\r' && text[i + 1] === '\n') {
-                            i++; // Skip \n if \r\n
-                        }
+                        if (char === '\r' && text[i + 1] === '\n') i++;
                         if (currentCell) {
                             currentRow.push(currentCell.trim());
                             currentCell = '';
@@ -152,28 +172,18 @@
                         currentCell += char;
                     }
                 }
-
-                // Handle last row
                 if (currentCell || currentRow.length > 0) {
-                    if (currentCell) {
-                        currentRow.push(currentCell.trim());
-                    }
-                    if (currentRow.length > 0) {
-                        rows.push(currentRow);
-                    }
+                    if (currentCell) currentRow.push(currentCell.trim());
+                    if (currentRow.length > 0) rows.push(currentRow);
                 }
-
-                // Filter and select columns
                 const filteredRows = rows.filter((row, index) => 
                     index === 0 || (row[19] && row[19].includes('2025'))
                 );
-
                 return filteredRows.map(row => 
                     SELECTED_COLUMNS.map(colIndex => 
                         row[colIndex] ? row[colIndex].replace(/^"|"$/g, '').trim() : ''
                     )
                 );
-
             } catch (error) {
                 console.error('Error:', error);
                 document.getElementById('loading').textContent = 'เกิดข้อผิดพลาดในการโหลดข้อมูล';
@@ -189,22 +199,156 @@
             const ws_data = [headers, ...data];
             const wb = XLSX.utils.book_new();
             const ws = XLSX.utils.aoa_to_sheet(ws_data);
-            
-            // Set column widths
-            const colWidths = headers.map(() => ({ wch: 20 }));
-            ws['!cols'] = colWidths;
-            
+            ws['!cols'] = headers.map(() => ({ wch: 20 }));
             XLSX.utils.book_append_sheet(wb, ws, "ค่าปรับนอกKPI");
-            
             const timestamp = new Date().toLocaleDateString('th-TH', {
-                year: 'numeric',
-                month: '2-digit',
-                day: '2-digit',
-                hour: '2-digit',
-                minute: '2-digit'
+                year: 'numeric', month: '2-digit', day: '2-digit',
+                hour: '2-digit', minute: '2-digit'
             }).replace(/[/:]/g, '');
-            
             XLSX.writeFile(wb, `ค่าปรับอุปกรณ์_${timestamp}.xlsx`);
+        }
+
+        function createChart(data) {
+            if (!data || data.length <= 1) return;
+
+            const headers = data[0];
+            const monthIndex = headers.indexOf("เดือนDueที่นำส่งหัก");
+            const fineIndex = headers.indexOf("ค่าปรับ");
+            const workIndex = headers.indexOf("งาน");
+
+            if (monthIndex === -1 || fineIndex === -1 || workIndex === -1) {
+                console.error("ไม่พบคอลัมน์ที่ต้องการ");
+                return;
+            }
+
+            const chartData = {};
+            const works = new Set();
+            const rawData = data.slice(1);
+            const totals = {};
+
+            rawData.forEach(row => {
+                const month = row[monthIndex];
+                const fine = parseFloat(row[fineIndex].replace(/,/g, '')) || 0;
+                const work = row[workIndex] || "ไม่ระบุ";
+
+                if (!chartData[month]) chartData[month] = {};
+                chartData[month][work] = (chartData[month][work] || 0) + fine;
+                works.add(work);
+
+                totals[month] = (totals[month] || 0) + fine;
+            });
+
+            const months = Object.keys(chartData).sort();
+            const workList = Array.from(works);
+
+            const datasets = workList.map((work, index) => ({
+                label: work === "TVS CATV" ? "TVS CATV" : "TOL",
+                data: months.map(month => chartData[month][work] || 0),
+                backgroundColor: work === "TVS CATV" ? COLORS[0] : COLORS[1],
+                borderColor: work === "TVS CATV" ? COLORS[0].replace('0.8', '1') : COLORS[1].replace('0.8', '1'),
+                borderWidth: 1
+            }));
+
+            const ctx = document.getElementById('fineChart').getContext('2d');
+            if (chart) chart.destroy();
+
+            chart = new Chart(ctx, {
+                type: 'bar',
+                plugins: [ChartDataLabels],
+                data: {
+                    labels: months,
+                    datasets: datasets
+                },
+                options: {
+                    plugins: {
+                        title: {
+                            display: true,
+                            text: 'กราฟค่าปรับตามงานและเดือน (หน่วย: บาท)',
+                            font: { size: 16 },
+                            color: '#0000FF'
+                        },
+                        legend: {
+                            position: 'right',
+                            labels: {
+                                boxWidth: 15,
+                                padding: 10,
+                                font: { size: 12 }
+                            }
+                        },
+                        tooltip: {
+                            callbacks: {
+                                label: function(context) {
+                                    return `${context.dataset.label}: ${context.parsed.y.toLocaleString('th-TH', { minimumFractionDigits: 2 })} บาท`;
+                                }
+                            }
+                        },
+                        datalabels: {
+                            anchor: 'center', // แสดงตรงกลางแท่ง
+                            align: 'center',
+                            color: '#000',
+                            font: {
+                                size: 10,
+                                weight: 'bold'
+                            },
+                            formatter: (value, context) => {
+                                return value > 0 ? value.toLocaleString('th-TH') : '';
+                            }
+                        },
+                        // เพิ่มผลรวมเหนือกราฟ
+                        annotation: {
+                            annotations: months.map((month, index) => ({
+                                type: 'label',
+                                xValue: index,
+                                yValue: totals[month] + (totals[month] * 0.1), // ระยะห่างจากแท่ง
+                                content: totals[month].toLocaleString('th-TH'),
+                                color: '#000',
+                                font: {
+                                    size: 12,
+                                    weight: 'bold'
+                                },
+                                textAlign: 'center',
+                                backgroundColor: 'rgba(255, 255, 255, 0.8)',
+                                borderRadius: 5,
+                                padding: 5,
+                                borderColor: '#000',
+                                borderWidth: 1
+                            }))
+                        }
+                    },
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    scales: {
+                        x: {
+                            stacked: true,
+                            title: {
+                                display: true,
+                                text: 'เดือนDueที่นำส่งหัก',
+                                font: { size: 12 }
+                            },
+                            ticks: {
+                                maxRotation: 0,
+                                minRotation: 0,
+                                font: { size: 10 }
+                            }
+                        },
+                        y: {
+                            stacked: true,
+                            title: {
+                                display: true,
+                                text: 'ค่าปรับ (บาท)',
+                                font: { size: 12 }
+                            },
+                            beginAtZero: true,
+                            ticks: {
+                                font: { size: 10 },
+                                callback: function(value) {
+                                    return value.toLocaleString('th-TH');
+                                }
+                            }
+                        }
+                    }
+                }
+            });
         }
 
         function populateTable(data) {
@@ -212,34 +356,19 @@
                 document.getElementById('loading').textContent = 'ไม่พบข้อมูล';
                 return;
             }
-
             const headerRow = document.getElementById('headerRow');
             const tableBody = document.getElementById('tableBody');
             const table = document.getElementById('dataTable');
-
-            // Clear existing content
-            headerRow.innerHTML = '';
-            tableBody.innerHTML = '';
-
-            // Add headers
-            headerRow.innerHTML = data[0].map(header => 
-                `<th>${header || ''}</th>`
-            ).join('');
-
-            // Add body rows
+            
+            headerRow.innerHTML = data[0].map(header => `<th>${header || ''}</th>`).join('');
             tableBody.innerHTML = data.slice(1).map(row => 
                 `<tr>${row.map(cell => `<td>${cell || ''}</td>`).join('')}</tr>`
             ).join('');
-
-            // Hide loading and show table
+            
             document.getElementById('loading').style.display = 'none';
             table.style.display = 'table';
-
-            // Initialize DataTable
-            if (dataTable) {
-                dataTable.destroy();
-            }
-
+            
+            if (dataTable) dataTable.destroy();
             dataTable = $('#dataTable').DataTable({
                 scrollX: true,
                 scrollY: '75vh',
@@ -247,9 +376,7 @@
                 ordering: true,
                 searching: true,
                 pageLength: 25,
-                language: {
-                    url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/th.json'
-                },
+                language: { url: '//cdn.datatables.net/plug-ins/1.13.7/i18n/th.json' },
                 dom: '<"top"lf>rt<"bottom"ip><"clear">',
                 initComplete: function() {
                     this.api().columns().every(function() {
@@ -259,6 +386,9 @@
                     });
                 }
             });
+
+            if (chart) chart.destroy();
+            createChart(data);
         }
 
         function refreshData() {
@@ -267,7 +397,6 @@
             fetchData().then(data => populateTable(data));
         }
 
-        // Initialize everything when document is ready
         document.addEventListener('DOMContentLoaded', async () => {
             updateDateTime();
             setInterval(updateDateTime, 1000);
