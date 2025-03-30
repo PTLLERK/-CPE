@@ -110,9 +110,9 @@
 </head>
 <body class="container-fluid p-4">
     <div class="back-button-container">
-        <a href="https://ptllerk.github.io/Saraban/home.html" id="backButton">
+        <button id="backButton">
             <i class="fas fa-home"></i> กลับสู่หน้าหลัก
-        </a>
+        </button>
     </div>
     <div id="datetime"></div>
     <div class="chart-container">
@@ -265,6 +265,12 @@
             
             document.getElementById('refreshBtn').addEventListener('click', refreshData);
             document.getElementById('downloadBtn').addEventListener('click', downloadExcel);
+
+            // เพิ่ม event listener สำหรับปุ่ม "กลับสู่หน้าหลัก"
+            document.getElementById('backButton').addEventListener('click', function() {
+                window.open('https://ptllerk.github.io/Saraban/home.html', '_blank');
+                window.close();
+            });
             
             const data = await fetchData();
             populateTable(data);
